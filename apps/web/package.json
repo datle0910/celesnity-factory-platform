@@ -1,0 +1,25 @@
+{
+  "name": "@celesnity/web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Operator interface: data sources and production lines",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.102.8",
+    "next": "16.3.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "24.10.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3"
+  }
+}
