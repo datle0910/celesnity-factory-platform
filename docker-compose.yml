@@ -1,0 +1,165 @@
+
+# Celesnity factory data platform — full local stack.
+#
+#   cp .env.example .env && docker compose up --build
+#
+# MQTT is optional and therefore behind a compose profile. The default
+# `docker compose up` starts every required service and no MQTT service, so the
+# platform and its test suite run fully without a broker present. Enable it with
+#   docker compose --profile mqtt up --build
+
+name: celesnity-factory-platform
+
+services:
+  # --------------------------------------------------------------------------
+  # Postgres hosts two logically separate databases:
+  #   platform   — this application's own persistence
+  #   production — the factory's production database, i.e. an *external* system
+  #                that the "Database Connection" source integrates with
+  # --------------------------------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-celesnity}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-celesnity_local_dev}
+      POSTGRES_DB: platform
+      PRODUCTION_DB_PASSWORD: ${PRODUCTION_DB_PASSWORD:-factory_local_dev}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./apps/db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-celesnity} -d platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # --------------------------------------------------------------------------
+  # Fixture: the factory's internal application, exposed as a paginated REST API
+  # --------------------------------------------------------------------------
+  fixture-app-api:
+    build:
+      context: .
+      dockerfile: apps/fixtures/app-api/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: 4001
+    ports:
+      - "${APP_API_PORT:-4001}:4001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # --------------------------------------------------------------------------
+  # Fixture: the supplier portal, a paginated server-rendered HTML page
+  # --------------------------------------------------------------------------
+  fixture-supplier-portal:
+    build:
+      context: .
+      dockerfile: apps/fixtures/supplier-portal/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: 4002
+    ports:
+      - "${SUPPLIER_PORTAL_PORT:-4002}:4002"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # --------------------------------------------------------------------------
+  # The platform API. Applies migrations and seeds the demo sources on start.
+  # --------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-celesnity}:${POSTGRES_PASSWORD:-celesnity_local_dev}@postgres:5432/platform?schema=public
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}
+      STALE_THRESHOLD_MINUTES: ${STALE_THRESHOLD_MINUTES:-15}
+      QUANTITY_TOLERANCE: ${QUANTITY_TOLERANCE:-0.05}
+      SEED_ORGANIZATION_ID: ${SEED_ORGANIZATION_ID:-org-celesnity-laundry}
+      SEED_ORGANIZATION_NAME: ${SEED_ORGANIZATION_NAME:-Celesnity Industrial Laundry}
+      SEED_ACTOR: ${SEED_ACTOR:-line.manager@celesnity.local}
+      # Where the seeded source registrations point, as seen from this container
+      FIXTURE_APP_API_URL: http://fixture-app-api:4001
+      FIXTURE_SUPPLIER_PORTAL_URL: http://fixture-supplier-portal:4002
+      PRODUCTION_DB_HOST: postgres
+      PRODUCTION_DB_PORT: 5432
+      PRODUCTION_DB_NAME: production
+      PRODUCTION_DB_USER: factory_reader
+      # Supplied by environment variable reference — the value is read at connect
+      # time and is never written to the platform database or returned by the API.
+      PRODUCTION_DB_PASSWORD: ${PRODUCTION_DB_PASSWORD:-factory_local_dev}
+      MQTT_BROKER_URL: ${MQTT_BROKER_URL:-}
+    ports:
+      - "${API_PORT:-4000}:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      fixture-app-api:
+        condition: service_healthy
+      fixture-supplier-portal:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # --------------------------------------------------------------------------
+  # The operator-facing web application.
+  # NEXT_PUBLIC_API_BASE_URL is resolved by the browser, so it stays on
+  # localhost even though the API is reachable as `api` inside the network.
+  # --------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # --------------------------------------------------------------------------
+  # Optional MQTT stack — not started by `docker compose up`.
+  # --------------------------------------------------------------------------
+  mosquitto:
+    image: eclipse-mosquitto:2
+    profiles: ["mqtt"]
+    restart: unless-stopped
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
+    volumes:
+      - ./apps/fixtures/mqtt-simulator/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  mqtt-simulator:
+    build:
+      context: .
+      dockerfile: apps/fixtures/mqtt-simulator/Dockerfile
+    profiles: ["mqtt"]
+    restart: unless-stopped
+    environment:
+      MQTT_BROKER_URL: mqtt://mosquitto:1883
+    depends_on:
+      - mosquitto
+
+volumes:
+  postgres-data:
