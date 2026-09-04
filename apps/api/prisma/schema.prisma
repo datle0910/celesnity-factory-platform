@@ -1,0 +1,259 @@
+// ===========================================================================
+// Platform persistence.
+//
+// The model separates three layers that must never be conflated:
+//
+//   SourceRecord    every observation ever collected, exactly as the source
+//                   presented it. Append-only. This is the audit trail and is
+//                   never rewritten by normalisation.
+//   CanonicalEvent  exactly one accepted event per (batch, station), chosen
+//                   from the observations by a deterministic policy.
+//   ManagementEvent what a human did about it. Append-only, never overwrites
+//                   collected history.
+//
+// Batch state, current station, WIP and freshness are derived from these on
+// read rather than stored, so there is only ever one source of truth.
+// ===========================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// The connection URL lives in prisma.config.ts for Migrate, and reaches the
+// runtime client through the pg driver adapter in src/prisma/prisma.service.ts.
+datasource db {
+  provider = "postgresql"
+}
+
+enum SourceType {
+  APPLICATION_API
+  CRAWLER
+  DATABASE
+  MQTT
+}
+
+enum SourceStatus {
+  REGISTERED
+  VERIFIED
+  ERROR
+}
+
+enum RunStatus {
+  RUNNING
+  SUCCEEDED
+  PARTIAL
+  FAILED
+}
+
+/// The six fixed steps of the laundry process, in order.
+enum Station {
+  RECEIVING
+  SORTING
+  WASHING
+  DRYING
+  FOLDING
+  DISPATCH
+}
+
+enum ContributionRole {
+  /// The observation the platform accepted for this batch and station.
+  WINNER
+  /// A repeat delivery of an observation the platform had already accepted.
+  DUPLICATE
+  /// A competing observation from a less authoritative source.
+  SUPERSEDED
+}
+
+enum ManagementEventType {
+  ACKNOWLEDGE_EXCEPTION
+  BLOCK
+  RESUME
+  NOTE
+}
+
+model Organization {
+  id               String            @id
+  name             String
+  createdAt        DateTime          @default(now())
+  sources          Source[]
+  managementEvents ManagementEvent[]
+}
+
+model Source {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  type           SourceType
+  status         SourceStatus @default(REGISTERED)
+
+  /// Connection settings and the operator's collection selection. Never holds
+  /// a credential: see secretEnvVar and secretCipher below.
+  config Json
+
+  /// Name of the environment variable holding the credential, when the
+  /// credential is supplied by reference. The value is read at connect time.
+  secretEnvVar String?
+
+  /// AES-256-GCM ciphertext, when the credential was supplied through the
+  /// masked input in the interface. Never projected into an API response.
+  secretCipher String?
+
+  lastVerifiedAt  DateTime?
+  lastVerifyError String?
+
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  runs      CollectionRun[]
+  records   SourceRecord[]
+
+  @@unique([organizationId, name])
+}
+
+model CollectionRun {
+  id       String    @id @default(cuid())
+  sourceId String
+  source   Source    @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  status   RunStatus @default(RUNNING)
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  durationMs Int?
+
+  /// Rows the source presented.
+  recordsRead Int @default(0)
+  /// Observations written to the audit trail.
+  recordsStored Int @default(0)
+  /// Rows carrying a stable id the platform had already accepted.
+  recordsDuplicate Int @default(0)
+  /// Rows that could not be normalised. They are still stored.
+  recordsRejected Int @default(0)
+  errorCount      Int @default(0)
+
+  /// Row-level failures: [{ stage, message, context }]
+  errors Json @default("[]")
+  /// Run-level notes such as retries and pagination-loop detection.
+  stats Json @default("{}")
+
+  records SourceRecord[]
+
+  @@index([sourceId, startedAt])
+}
+
+model SourceRecord {
+  id              String        @id @default(cuid())
+  sourceId        String
+  source          Source        @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  collectionRunId String
+  collectionRun   CollectionRun @relation(fields: [collectionRunId], references: [id], onDelete: Cascade)
+
+  /// Stable identifier issued by the source system. Together with sourceId it
+  /// identifies one real-world observation across collection runs.
+  sourceRecordId String
+  /// Which dataset, table or topic within the source this came from.
+  dataset String
+
+  /// The observation exactly as the source presented it. Never modified.
+  payload Json
+
+  collectedAt DateTime @default(now())
+
+  // --- Normalised projection ------------------------------------------------
+  // Null on records that carry no operational event, such as work-order master
+  // data, and on records that failed to parse.
+  batchId    String?
+  station    Station?
+  quantity   Int?
+  occurredAt DateTime?
+  /// When the source system itself recorded the event, where it exposes that
+  /// separately from when it happened. Drives late-arrival detection.
+  recordedAt DateTime?
+
+  /// Set when the row could not be normalised. The row is still stored so the
+  /// failure is auditable rather than silently dropped.
+  parseError String?
+
+  contributions CanonicalEventContribution[]
+
+  @@index([sourceId, sourceRecordId])
+  @@index([batchId, station])
+  @@index([collectionRunId])
+}
+
+model CanonicalEvent {
+  id      String  @id @default(cuid())
+  batchId String
+  station Station
+
+  quantity   Int?
+  /// When the event happened on the floor.
+  occurredAt DateTime
+  /// When the platform became aware of it: the source's own recorded_at where
+  /// available, otherwise when it was collected.
+  observedAt DateTime
+  acceptedAt DateTime @default(now())
+
+  /// True when this event became known only after a later station had already
+  /// been observed. It enriches history but never moves the batch backwards.
+  isLate Boolean @default(false)
+
+  /// True when two different sources reported different quantities here.
+  hasConflict Boolean @default(false)
+
+  /// Which rule selected the winner, surfaced in the interface so an operator
+  /// can see why one observation was accepted over another.
+  resolution Json
+
+  contributions CanonicalEventContribution[]
+
+  @@unique([batchId, station])
+  @@index([batchId])
+}
+
+model CanonicalEventContribution {
+  id               String           @id @default(cuid())
+  canonicalEventId String
+  canonicalEvent   CanonicalEvent   @relation(fields: [canonicalEventId], references: [id], onDelete: Cascade)
+  sourceRecordId   String
+  sourceRecord     SourceRecord     @relation(fields: [sourceRecordId], references: [id], onDelete: Cascade)
+  role             ContributionRole
+  reason           String
+
+  @@unique([canonicalEventId, sourceRecordId])
+  @@index([sourceRecordId])
+}
+
+/// batchId to work order and line, as published by the application API. Other
+/// sources only carry batchId and are joined back to a line through this.
+model BatchLink {
+  batchId         String   @id
+  workOrderId     String
+  lineId          String
+  plannedQuantity Int?
+  linenType       String?
+  updatedAt       DateTime @updatedAt
+}
+
+model WorkOrder {
+  workOrderId String    @id
+  lineId      String
+  customer    String?
+  dueAt       DateTime?
+  status      String?
+  updatedAt   DateTime  @updatedAt
+}
+
+/// Append-only record of manager intervention. Never overwrites collected
+/// history; batch state is derived by replaying these in order.
+model ManagementEvent {
+  id             String              @id @default(cuid())
+  organizationId String
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  batchId        String
+  type           ManagementEventType
+  actor          String
+  note           String?
+  createdAt      DateTime            @default(now())
+
+  @@index([batchId, createdAt])
+}
