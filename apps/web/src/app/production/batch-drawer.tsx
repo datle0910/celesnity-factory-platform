@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { BatchStateBadge, IndicatorChip } from '@/components/badge';
+import { RunLink } from '@/components/run-link';
 import { api } from '@/lib/api';
 import type { BatchDetail, ManagementEvent, ManagementEventType } from '@/lib/types';
 import { STATIONS } from '@/lib/types';
@@ -116,23 +117,26 @@ export function BatchDrawer({ batchId, onClose }: { batchId: string; onClose: ()
                     </p>
                     <ul className="mt-2 space-y-1 text-xs">
                       {entry.contributions.map((contribution) => (
-                        <li key={contribution.record.id} className="flex items-center justify-between gap-2">
-                          <span>
-                            <span
-                              className={
-                                contribution.role === 'WINNER'
-                                  ? 'text-emerald-700'
-                                  : contribution.role === 'DUPLICATE'
-                                    ? 'text-slate-500'
-                                    : 'text-amber-700'
-                              }
-                            >
-                              {contribution.role.toLowerCase()}
-                            </span>{' '}
-                            {contribution.record.source.name} · {contribution.record.sourceRecordId}
-                            {contribution.record.quantity !== null ? ` · ${contribution.record.quantity} units` : ''}
-                          </span>
-                          <span className="text-[var(--color-text-muted)]">{contribution.reason}</span>
+                        <li key={contribution.record.id} className="space-y-1 border-t border-[var(--color-border)] pt-1.5 first:border-0 first:pt-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span>
+                              <span
+                                className={
+                                  contribution.role === 'WINNER'
+                                    ? 'text-emerald-700'
+                                    : contribution.role === 'DUPLICATE'
+                                      ? 'text-slate-500'
+                                      : 'text-amber-700'
+                                }
+                              >
+                                {contribution.role.toLowerCase()}
+                              </span>{' '}
+                              {contribution.record.source.name} · {contribution.record.sourceRecordId}
+                              {contribution.record.quantity !== null ? ` · ${contribution.record.quantity} units` : ''}
+                            </span>
+                            <span className="text-[var(--color-text-muted)]">{contribution.reason}</span>
+                          </div>
+                          <RunLink runId={contribution.record.collectionRunId} />
                         </li>
                       ))}
                     </ul>

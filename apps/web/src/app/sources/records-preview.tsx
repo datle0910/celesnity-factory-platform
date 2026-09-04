@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '@/lib/api';
+import { RunLink } from '@/components/run-link';
 import type { RecordsPage } from '@/lib/types';
 
 /**
@@ -39,6 +40,7 @@ export function RecordsPreview() {
               <th className="px-3 py-2 font-medium">Station</th>
               <th className="px-3 py-2 font-medium">Qty</th>
               <th className="px-3 py-2 font-medium">Collected</th>
+              <th className="px-3 py-2 font-medium">Run</th>
               <th className="px-3 py-2 font-medium">Outcome</th>
             </tr>
           </thead>
@@ -52,6 +54,9 @@ export function RecordsPreview() {
                 <td className="px-3 py-2">{record.normalised.quantity ?? '—'}</td>
                 <td className="px-3 py-2 text-[var(--color-text-muted)]">
                   {new Date(record.collectedAt).toLocaleTimeString()}
+                </td>
+                <td className="px-3 py-2">
+                  <RunLink runId={record.collectionRunId} />
                 </td>
                 <td className="px-3 py-2">
                   {record.parseError ? (
