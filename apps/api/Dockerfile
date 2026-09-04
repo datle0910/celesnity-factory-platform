@@ -11,6 +11,10 @@ COPY apps/fixtures/mqtt-simulator/package.json apps/fixtures/mqtt-simulator/
 RUN npm ci --workspace @celesnity/api --include-workspace-root
 
 COPY apps/api apps/api
+# prisma generate only reads the schema, it never connects — but prisma.config.ts
+# resolves DATABASE_URL eagerly, so the build stage needs a syntactically valid
+# placeholder. The real value is supplied at container run time.
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 RUN npm run prisma:generate --workspace @celesnity/api
 RUN npm run build --workspace @celesnity/api
 
