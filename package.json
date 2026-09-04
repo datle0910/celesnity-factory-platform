@@ -1,0 +1,27 @@
+{
+  "name": "celesnity-factory-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Factory data collection and production-line visibility platform for an industrial laundry",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/api",
+    "apps/web",
+    "apps/fixtures/app-api",
+    "apps/fixtures/supplier-portal",
+    "apps/fixtures/mqtt-simulator"
+  ],
+  "scripts": {
+    "dev:infra": "docker compose up -d postgres",
+    "dev:api": "npm run start:dev --workspace @celesnity/api",
+    "dev:web": "npm run dev --workspace @celesnity/web",
+    "dev:fixtures": "npm run dev --workspace @celesnity/fixture-app-api & npm run dev --workspace @celesnity/fixture-supplier-portal",
+    "prisma:generate": "npm run prisma:generate --workspace @celesnity/api",
+    "prisma:migrate": "npm run prisma:migrate --workspace @celesnity/api",
+    "seed": "npm run seed --workspace @celesnity/api",
+    "test": "npm run test --workspace @celesnity/api",
+    "build": "npm run build --workspace @celesnity/api && npm run build --workspace @celesnity/web"
+  }
+}

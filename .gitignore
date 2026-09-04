@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Secrets must never be committed. Only .env.example is tracked.
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Assessment source documents (not part of the deliverable)
+*.docx
+
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+.idea/
+.vscode/
+!.vscode/extensions.json
