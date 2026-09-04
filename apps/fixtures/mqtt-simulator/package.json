@@ -1,0 +1,19 @@
+{
+  "name": "@celesnity/fixture-mqtt-simulator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Optional fixture publishing washing and drying telemetry to a local MQTT broker",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/simulator.ts",
+    "start": "tsx src/simulator.ts"
+  },
+  "dependencies": {
+    "mqtt": "5.15.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3"
+  }
+}
